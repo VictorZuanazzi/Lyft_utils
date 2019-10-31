@@ -4,7 +4,6 @@ import pandas as pd
 from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt
 
-
 from LyftDataset import LyftDataset, LyftDatasetExplorer
 from Box import Box
 from PointCloud import PointCloud, RadarPointCloud, LidarPointCloud
@@ -53,8 +52,3 @@ my_sample = lyft_dataset.get('sample', my_sample_token)
 # lyft_dataset.render_sample_data(my_sample['data']['LIDAR_TOP'], nsweeps=5)
 #
 # plt.show()
-
-from IPython.display import HTML
-
-anim = lyft_dataset.animate_images(scene=0, frames=50, interval=1)
-HTML(anim.to_jshtml(fps=8))
