@@ -16,6 +16,8 @@ from typing import Tuple, List
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy import arctan2, sqrt
+import numexpr as ne
 import sklearn.metrics
 from PIL import Image
 from lyft_dataset_sdk.utils.geometry_utils import BoxVisibility
@@ -34,6 +36,30 @@ PYTHON_VERSION = sys.version_info[0]
 
 if not PYTHON_VERSION == 3:
     raise ValueError("LyftDataset sdk only supports Python version 3.")
+
+# Todo: find  a better place to put those functions
+def cart2sph(x, y, z, ceval=ne.evaluate):
+    """ x, y, z :  ndarray coordinates
+        ceval: backend to use:
+              - eval :  pure Numpy
+              - numexpr.evaluate:  Numexpr """
+    azimuth = ceval('arctan2(y,x)')
+    xy2 = ceval('x**2 + y**2')
+    elevation = ceval('arctan2(z, sqrt(xy2))')
+    r = eval('sqrt(xy2 + z**2)')
+    return azimuth, elevation, r
+
+def cart2cil(x, y, z, ceval=ne.evaluate):
+    """ x, y, z :  ndarray coordinates
+        ceval: backend to use:
+              - eval :  pure Numpy
+              - numexpr.evaluate:  Numexpr """
+    azimuth = ceval('arctan2(y,x)')  # from -pi to pi
+    xy2 = ceval('x**2 + y**2')
+    elevation = z
+    r = eval('sqrt(xy2 + z**2)')
+    return azimuth, elevation, r
+
 
 class LyftDataset:
     """Database class for Lyft Dataset to help query and retrieve information from the database."""
@@ -525,6 +551,19 @@ class LyftDataset:
                                           pointsensor_channel=pointsensor_channel,
                                           camera_channel=camera_channel,
                                           interval=interval)
+
+    def lidar_bird_viewer(self, sample_data_token: str,
+                          num_sweeps: int = 1,
+                          ax: Axes = None,
+                          img_dims=(360, 64),
+                          contrast: float = 10,
+                          save_path: str = None):
+        return self.explorer.lidar_bird_viewer(sample_data_token=sample_data_token,
+                                               num_sweeps=num_sweeps,
+                                               ax=ax,
+                                               img_dims=img_dims,
+                                               contrast=contrast,
+                                               save_path=save_path)
 
 class LyftDatasetExplorer:
     """Helper class to list and visualize Lyft Dataset data. These are meant to serve as tutorials and templates for
@@ -1613,3 +1652,131 @@ class LyftDatasetExplorer:
         anim = animation.FuncAnimation(fig, animate_fn, frames=frames, interval=interval)
 
         return anim
+
+    def lidar_bird_viewer(self, sample_data_token: str,
+                          num_sweeps: int = 1,
+                          ax: Axes = None,
+                          img_dims=(360, 64),
+                          contrast: float = 10,
+                          save_path: str = None):
+
+        # TODO: improve the script for generating the bird eye image
+        # * image's size may change in the y direction
+
+        # Get the point cloud data
+        xyz_pc, _ = self.lyftd.get_point_cloud(sample_data_token, corrected=False, num_sweeps=num_sweeps)
+
+        # spherical projection of the xyz data:
+        sph_data = np.zeros(xyz_pc.shape)
+
+        # azimuth, elevation, distance
+        sph_data[0, :], sph_data[1, :], sph_data[2, :] = cart2sph(*xyz_pc)
+
+        # translate points to the non-negative
+        sph_data[:2] = (abs(sph_data[:2].min(axis=1)) + sph_data[:2].T).T
+
+        # re-scales the data
+        scale = np.array([img_dims[0] - 1, img_dims[1] - 1, 1]) / sph_data.max(axis=1)
+        sph_data = (sph_data.T * scale).T
+
+        # discretization step
+        sph_data[0] = sph_data[0].astype(int)
+        sph_data[1] = (10 * sph_data[1]).astype(int)  # without the *10 the we lose too many probes
+
+        # change the y dimension to avoid black lines in the image
+        probes = np.unique(sph_data[1])
+        # y_dim = len(probes)
+        y_dim = img_dims[1] + 1 # gambiarra, just to make the flow work
+        # assert y_dim == img_dims[1], f"Image resized in y from {img_dims[1]} to {y_dim}"
+
+        # create the image
+        image = np.zeros((y_dim, img_dims[0]))  # note y, x dims is on purpose!
+
+        # very inneficient way of doing it:
+        for i in range(len(sph_data[0])):
+            # indexes are upside down
+            x = int(sph_data[0, i])
+            y = int(np.where(sph_data[1, i] == probes)[0][0])
+            z = sph_data[2, i]
+            image[y, x] = (1 - z) ** contrast
+
+        # normalize pixel values between 0 and 1
+        image = image / image.max() - image.min()
+
+        # image was made upside down
+        image = np.flip(image)
+
+        if ax is None:
+            _, ax = plt.subplots(1, 1, figsize=(20, 10))
+
+        ax.imshow(image, cmap='gray')
+
+        if save_path is not None:
+            plt.imsave(save_path, image, )
+
+
+    def animate_lidar_bird_view(self, scene, frames: int, interval=1, save_path = None, num_sweeps: int = 1):
+        """generates an animation using the lidar frames.
+        Input:
+            scene: int, index of the scene.
+            frames: int, number of frames of the animation.
+            interval: int, interval between frames. interval = 1 does not skip any frame.
+            with_anns: bool, renders the annotations on top of the frames.
+            pointsensor_channel: str, choses the lidar from which to render the data.
+        Output:
+            return type: matplotlib.animation.FuncAnimation. With the animation.
+            """
+        generator = self.generate_next_token(scene)
+
+        fig, axs = plt.subplots(1, 1, figsize=(20, 10))
+        plt.close(fig)
+
+        if save_path is not None:
+            os.makedirs(save_path, exist_ok=True)
+
+        def animate_fn(i):
+            for _ in range(interval):
+                sample_token = next(generator)
+
+            if save_path is not None:
+                zeros = str(0) * (5 - len(str(i)))
+                save_name = save_path + "/" + zeros + str(i) + ".png"
+            else:
+                save_name = None
+
+            axs.clear()
+            sample_record = self.lyftd.get("sample", sample_token)
+            pointsensor_token = sample_record["data"]["LIDAR_TOP"]
+            self.lyftd.lidar_bird_viewer(sample_data_token=pointsensor_token,
+                                         num_sweeps=num_sweeps,
+                                         ax=axs,
+                                         img_dims=(360, 64),
+                                         save_path=save_name)
+
+        anim = animation.FuncAnimation(fig, animate_fn, frames=frames, interval=interval)
+
+        return anim
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
