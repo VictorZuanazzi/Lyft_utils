@@ -25,6 +25,8 @@ from lyft_dataset_sdk.utils.map_mask import MapMask
 from matplotlib.axes import Axes
 from pyquaternion import Quaternion
 from tqdm import tqdm
+from matplotlib import animation, rc
+from IPython.display import HTML
 
 from Box import Box
 from PointCloud import PointCloud, LidarPointCloud, RadarPointCloud
@@ -84,7 +86,8 @@ class LyftDataset:
 
         # Initialize map mask for each map record.
         for map_record in self.map:
-            map_record["mask"] = MapMask(self.data_path / 'train_maps/map_raster_palo_alto.png', resolution=map_resolution)
+            map_record["mask"] = MapMask(self.data_path / 'train_maps/map_raster_palo_alto.png',
+                                         resolution=map_resolution)
 
         if verbose:
             for table in self.table_names:
@@ -451,7 +454,7 @@ class LyftDataset:
         nsweeps: int = 1,
         out_path: str = None,
         underlay_map: bool = False,
-    ) -> None:
+    ):
         return self.explorer.render_sample_data(
             sample_data_token,
             with_anns,
@@ -494,6 +497,11 @@ class LyftDataset:
     def render_egoposes_on_map(self, log_location: str, scene_tokens: List = None, out_path: str = None) -> None:
         self.explorer.render_egoposes_on_map(log_location, scene_tokens, out_path=out_path)
 
+    def generate_next_token(self, scene: int = None, sample_token: str = None):
+        return self.explorer.genertor_next_token(scene=scene, sample_token=sample_token)
+
+    def animate_images(self, scene: int, frames: int, interval: int = 1, cams='all'):
+        return self.explorer.animate_images(scene=scene, frames=frames, interval=interval, cams=cams)
 
 class LyftDatasetExplorer:
     """Helper class to list and visualize Lyft Dataset data. These are meant to serve as tutorials and templates for
@@ -1384,3 +1392,68 @@ class LyftDatasetExplorer:
         if out_path is not None:
             plt.savefig(out_path)
             plt.close("all")
+
+    def generate_next_token(self, scene: int = 0, sample_token: str = None):
+        """Iterator of frames of one scene.
+        Input:
+            scene: int or None, the index of the scene.
+            sample_token: the frame token of the scene. If None, the first sample token is used.
+
+        Output:
+            Iterator of sample_tokens"""
+
+        sample_token = self.lyftd.scene[scene]['first_sample_token'] if sample_token is None else sample_token
+
+        sample_record = self.lyftd.get("sample", sample_token)
+
+        while sample_record['next']:
+            sample_token = sample_record['next']
+            sample_record = self.lyftd.get("sample", sample_token)
+
+            yield sample_token
+
+    def animate_images(self, scene: int, frames: int, interval: int = 1, cams='all'):
+        """generates an animation using the cameras.
+        Input:
+            scene: int, index of the scene.
+            frames: int, number of frames of the animation.
+            interval: int, interval between frames. interval = 1 does not skip any frame.
+            cams: list(str) or str, ordered list camera views to be used. If cams = 'all' then all camera views will
+                be used.
+        Output:
+            return type: matplotlib.animation.FuncAnimation. With the animation.
+            """
+        if cams == 'all':
+            cams = ['CAM_BACK_LEFT',  'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_RIGHT', 'CAM_BACK',]
+
+        generator = self.generate_next_token(scene=scene)
+
+        fig, axs = plt.subplots(
+            2, len(cams), figsize=(3 * len(cams), 6),
+            sharex=True, sharey=True, gridspec_kw={'wspace': 0, 'hspace': 0.1}
+        )
+
+        plt.close(fig)
+
+        # Where the magic happens
+        def animate_fn(i):
+            for _ in range(interval):
+                sample_token = next(generator)
+
+            for c, camera_channel in enumerate(cams):
+                sample_record = self.lyftd.get("sample", sample_token)
+
+                camera_token = sample_record["data"][camera_channel]
+
+                axs[0, c].clear()
+                axs[1, c].clear()
+
+                self.lyftd.render_sample_data(camera_token, with_anns=False, ax=axs[0, c])
+                self.lyftd.render_sample_data(camera_token, with_anns=True, ax=axs[1, c])
+
+                axs[0, c].set_title("")
+                axs[1, c].set_title("")
+
+        anim = animation.FuncAnimation(fig, animate_fn, frames=frames, interval=interval)
+
+        return anim
