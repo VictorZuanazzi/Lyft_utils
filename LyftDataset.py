@@ -503,6 +503,13 @@ class LyftDataset:
     def animate_images(self, scene: int, frames: int, interval: int = 1, cams='all'):
         return self.explorer.animate_images(scene=scene, frames=frames, interval=interval, cams=cams)
 
+    def animate_lidar(self, scene, frames, pointsensor_channel='LIDAR_TOP', with_anns=True, interval=1):
+        return self.explorer.animate_lidar(scene=scene,
+                                           frames=frames,
+                                           pointsensor_channel=pointsensor_channel,
+                                           with_anns=with_anns,
+                                           interval=interval)
+
 class LyftDatasetExplorer:
     """Helper class to list and visualize Lyft Dataset data. These are meant to serve as tutorials and templates for
     working with the data."""
@@ -1412,12 +1419,13 @@ class LyftDatasetExplorer:
 
             yield sample_token
 
-    def animate_images(self, scene: int, frames: int, interval: int = 1, cams='all'):
+    def animate_images(self, scene: int, frames: int, interval: int = 1, with_anns: bool = True, cams='all'):
         """generates an animation using the cameras.
         Input:
             scene: int, index of the scene.
             frames: int, number of frames of the animation.
             interval: int, interval between frames. interval = 1 does not skip any frame.
+            with_anns: bool, renders the annotations on top of the frames.
             cams: list(str) or str, ordered list camera views to be used. If cams = 'all' then all camera views will
                 be used.
         Output:
@@ -1449,10 +1457,39 @@ class LyftDatasetExplorer:
                 axs[1, c].clear()
 
                 self.lyftd.render_sample_data(camera_token, with_anns=False, ax=axs[0, c])
-                self.lyftd.render_sample_data(camera_token, with_anns=True, ax=axs[1, c])
+                self.lyftd.render_sample_data(camera_token, with_anns=with_anns, ax=axs[1, c])
 
                 axs[0, c].set_title("")
                 axs[1, c].set_title("")
+
+        anim = animation.FuncAnimation(fig, animate_fn, frames=frames, interval=interval)
+
+        return anim
+
+    def animate_lidar(self, scene, frames, pointsensor_channel='LIDAR_TOP', with_anns=True, interval=1):
+        """generates an animation using the lidar frames.
+        Input:
+            scene: int, index of the scene.
+            frames: int, number of frames of the animation.
+            interval: int, interval between frames. interval = 1 does not skip any frame.
+            with_anns: bool, renders the annotations on top of the frames.
+            pointsensor_channel: str, choses the lidar from which to render the data.
+        Output:
+            return type: matplotlib.animation.FuncAnimation. With the animation.
+            """
+        generator = self.generate_next_token(scene)
+
+        fig, axs = plt.subplots(1, 1, figsize=(8, 8))
+        plt.close(fig)
+
+        def animate_fn(i):
+            for _ in range(interval):
+                sample_token = next(generator)
+
+            axs.clear()
+            sample_record = self.lyftd.get("sample", sample_token)
+            pointsensor_token = sample_record["data"][pointsensor_channel]
+            self.lyftd.render_sample_data(pointsensor_token, with_anns=with_anns, ax=axs)
 
         anim = animation.FuncAnimation(fig, animate_fn, frames=frames, interval=interval)
 
