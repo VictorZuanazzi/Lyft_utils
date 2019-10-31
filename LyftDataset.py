@@ -25,8 +25,7 @@ from lyft_dataset_sdk.utils.map_mask import MapMask
 from matplotlib.axes import Axes
 from pyquaternion import Quaternion
 from tqdm import tqdm
-from matplotlib import animation, rc
-from IPython.display import HTML
+from matplotlib import animation
 
 from Box import Box
 from PointCloud import PointCloud, LidarPointCloud, RadarPointCloud
@@ -426,6 +425,7 @@ class LyftDataset:
         pointsensor_channel: str = "LIDAR_TOP",
         camera_channel: str = "CAM_FRONT",
         out_path: str = None,
+        ax: Axes = None
     ) -> None:
         self.explorer.render_pointcloud_in_image(
             sample_token,
@@ -433,6 +433,7 @@ class LyftDataset:
             pointsensor_channel=pointsensor_channel,
             camera_channel=camera_channel,
             out_path=out_path,
+            ax=ax
         )
 
     def render_sample(
@@ -517,6 +518,13 @@ class LyftDataset:
                                            pointsensor_channel=pointsensor_channel,
                                            with_anns=with_anns,
                                            interval=interval)
+
+    def animate_view(self, scene, frames, pointsensor_channel='LIDAR_TOP', camera_channel="CAM_FRONT", interval=1):
+        return self.explorer.animate_view(scene=scene,
+                                          frames=frames,
+                                          pointsensor_channel=pointsensor_channel,
+                                          camera_channel=camera_channel,
+                                          interval=interval)
 
 class LyftDatasetExplorer:
     """Helper class to list and visualize Lyft Dataset data. These are meant to serve as tutorials and templates for
@@ -709,6 +717,7 @@ class LyftDatasetExplorer:
         pointsensor_channel: str = "LIDAR_TOP",
         camera_channel: str = "CAM_FRONT",
         out_path: str = None,
+        ax=None,
     ) -> None:
         """Scatter-plots a point-cloud on top of image.
         Args:
@@ -725,11 +734,18 @@ class LyftDatasetExplorer:
         pointsensor_token = sample_record["data"][pointsensor_channel]
         camera_token = sample_record["data"][camera_channel]
 
+        # Init axes.
+        if ax is None:  # added
+            _, ax = plt.subplots(1, 1, figsize=(9, 9))  # added
+
         points, coloring, im = self.map_pointcloud_to_image(pointsensor_token, camera_token)
-        plt.figure(figsize=(9, 16))
-        plt.imshow(im)
-        plt.scatter(points[0, :], points[1, :], c=coloring, s=dot_size)
-        plt.axis("off")
+        # plt.figure(figsize=(9, 16)) # original
+        # plt.imshow(im)
+        # plt.scatter(points[0, :], points[1, :], c=coloring, s=dot_size)
+        ax.imshow(im)
+        ax.scatter(points[0, :], points[1, :], c=coloring, s=dot_size)
+        # plt.axis("off")
+        ax.axis("off")
 
         if out_path is not None:
             plt.savefig(out_path)
@@ -899,9 +915,12 @@ class LyftDatasetExplorer:
                 self.render_ego_centric_map(sample_data_token=sample_data_token, axes_limit=axes_limit, ax=ax)
 
             # Show point cloud.
-            points = view_points(
-                pc.points[:3, :], np.dot(vehicle_flat_from_vehicle, vehicle_from_sensor), normalize=False
-            )
+            points = view_points(pc.points[:3, :],
+                                 np.dot(vehicle_flat_from_vehicle,
+                                        vehicle_from_sensor),
+                                 normalize=False
+                                 )
+
             dists = np.sqrt(np.sum(pc.points[:2, :] ** 2, axis=0))
             colors = np.minimum(1, dists / axes_limit / np.sqrt(2))
             ax.scatter(points[0, :], points[1, :], c=colors, s=0.2)
@@ -1558,6 +1577,38 @@ class LyftDatasetExplorer:
             sample_record = self.lyftd.get("sample", sample_token)
             pointsensor_token = sample_record["data"][pointsensor_channel]
             self.lyftd.render_sample_data(pointsensor_token, with_anns=with_anns, ax=axs)
+
+        anim = animation.FuncAnimation(fig, animate_fn, frames=frames, interval=interval)
+
+        return anim
+
+    def animate_view(self, scene, frames, pointsensor_channel='LIDAR_TOP', camera_channel="CAM_FRONT", interval=1):
+        """generates an animation from a camera view.
+                Input:
+                    scene: int, index of the scene.
+                    frames: int, number of frames of the animation.
+                    interval: int, interval between frames. interval = 1 does not skip any frame.
+                    pointsensor_channel: str, choses the lidar from which to render the data.
+                    camera_channel: str, choses the camera view.
+                Output:
+                    return type: matplotlib.animation.FuncAnimation. With the animation.
+                    """
+        generator = self.generate_next_token(scene)
+
+        fig, axs = plt.subplots(1, 1, figsize=(8, 8))
+        plt.close(fig)
+
+        def animate_fn(i):
+            for _ in range(interval):
+                sample_token = next(generator)
+
+            axs.clear()
+            sample_record = self.lyftd.get("sample", sample_token)
+            pointsensor_token = sample_record["data"][pointsensor_channel]
+            self.lyftd.render_pointcloud_in_image(sample_token=sample_token,
+                                                  dot_size=1,
+                                                  camera_channel=camera_channel,
+                                                  ax=axs)
 
         anim = animation.FuncAnimation(fig, animate_fn, frames=frames, interval=interval)
 
