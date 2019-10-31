@@ -497,6 +497,14 @@ class LyftDataset:
     def render_egoposes_on_map(self, log_location: str, scene_tokens: List = None, out_path: str = None) -> None:
         self.explorer.render_egoposes_on_map(log_location, scene_tokens, out_path=out_path)
 
+    def get_point_cloud(self,
+                        sample_data_token: str,
+                        sensor_channel: str = 'LIDAR_TOP',
+                        num_sweeps: int = 1,
+                        corrected: bool = True,
+                        normalize: bool = False):
+        return self.explorer.get_point_cloud(sample_data_token, sensor_channel, num_sweeps, corrected, normalize)
+
     def generate_next_token(self, scene: int = None, sample_token: str = None):
         return self.explorer.genertor_next_token(scene=scene, sample_token=sample_token)
 
@@ -1399,6 +1407,66 @@ class LyftDatasetExplorer:
         if out_path is not None:
             plt.savefig(out_path)
             plt.close("all")
+
+    def get_point_cloud(self,
+                        sample_data_token: str,
+                        sensor_channel: str = 'LIDAR_TOP',
+                        num_sweeps: int = 1,
+                        corrected: bool = True,
+                        normalize: bool = False):
+        """get point cloud from the lidar data.
+        Input:
+            sample_data_token: str, token of the lidar frame to be extracted.
+            sensor_channel: srt, options: ['LIDAR_TOP', 'LIDAR_FRONT_LEFT', 'LIDAR_FRONT_RIGHT'].
+            num_sweeps: int, number of sweeps to retrieve.
+            corrected: bool, correct point cloud relative to the cordinates of the car.
+            normalize: bool, if corrected is True, whether to normalize the point cloud. Recommended setting is False.
+            """
+
+        # accessess metadata
+        sd_record = self.lyftd.get("sample_data", sample_data_token)
+        channel = sd_record["channel"]
+        sample_rec = self.lyftd.get("sample", sd_record["sample_token"])
+
+        # retrieve point cloud, igores time data.
+        lidar_data, _ = LidarPointCloud.from_file_multisweep(self.lyftd,
+                                                                   sample_rec,
+                                                                   channel,
+                                                                   sensor_channel,
+                                                                   num_sweeps=num_sweeps)
+
+        point_cloud = lidar_data.points[:3, :]
+        intensity = lidar_data.points[-1, :]
+
+        # correct coordinates of the point cloud using ego
+        if corrected:
+            # TODO: make it a separate function
+            # -------------- can be one function --------------
+            cs_record = self.lyftd.get("calibrated_sensor", sd_record["calibrated_sensor_token"])
+            pose_record = self.lyftd.get("ego_pose", sd_record["ego_pose_token"])
+            vehicle_from_sensor = np.eye(4)
+            vehicle_from_sensor[:3, :3] = Quaternion(cs_record["rotation"]).rotation_matrix
+            vehicle_from_sensor[:3, 3] = cs_record["translation"]
+
+            ego_yaw = Quaternion(pose_record["rotation"]).yaw_pitch_roll[0]
+            rot_vehicle_flat_from_vehicle = np.dot(
+                Quaternion(scalar=np.cos(ego_yaw / 2), vector=[0, 0, np.sin(ego_yaw / 2)]).rotation_matrix,
+                Quaternion(pose_record["rotation"]).inverse.rotation_matrix,
+            )
+
+            vehicle_flat_from_vehicle = np.eye(4)
+            vehicle_flat_from_vehicle[:3, :3] = rot_vehicle_flat_from_vehicle
+            # -------------- can be one function --------------
+
+            point_cloud = view_points(point_cloud,
+                                      np.dot(vehicle_flat_from_vehicle,
+                                             vehicle_from_sensor),
+                                      normalize=normalize
+                                      )
+
+        return point_cloud, intensity
+
+
 
     def generate_next_token(self, scene: int = 0, sample_token: str = None):
         """Iterator of frames of one scene.
