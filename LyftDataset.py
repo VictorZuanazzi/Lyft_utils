@@ -1686,7 +1686,7 @@ class LyftDatasetExplorer:
         # change the y dimension to avoid black lines in the image
         probes = np.unique(sph_data[1])
         # y_dim = len(probes)
-        y_dim = img_dims[1] + 1 # gambiarra, just to make the flow work
+        y_dim = img_dims[1] + 1  # gambiarra, just to make the flow work
         # assert y_dim == img_dims[1], f"Image resized in y from {img_dims[1]} to {y_dim}"
 
         # create the image
@@ -1697,6 +1697,8 @@ class LyftDatasetExplorer:
             # indexes are upside down
             x = int(sph_data[0, i])
             y = int(np.where(sph_data[1, i] == probes)[0][0])
+            if y >= y_dim: # another gambiarra, just to keep things from breaking
+                y = y_dim - 1
             z = sph_data[2, i]
             image[y, x] = (1 - z) ** contrast
 
