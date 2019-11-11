@@ -533,7 +533,7 @@ class LyftDataset:
         return self.explorer.get_point_cloud(sample_data_token, sensor_channel, num_sweeps, corrected, normalize)
 
     def generate_next_token(self, scene: int = None, sample_token: str = None):
-        return self.explorer.genertor_next_token(scene=scene, sample_token=sample_token)
+        return self.explorer.generate_next_token(scene=scene, sample_token=sample_token)
 
     def animate_images(self, scene: int, frames: int, interval: int = 1, cams='all'):
         return self.explorer.animate_images(scene=scene, frames=frames, interval=interval, cams=cams)
