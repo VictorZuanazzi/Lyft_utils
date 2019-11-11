@@ -527,10 +527,8 @@ class LyftDataset:
     def get_point_cloud(self,
                         sample_data_token: str,
                         sensor_channel: str = 'LIDAR_TOP',
-                        num_sweeps: int = 1,
-                        corrected: bool = True,
-                        normalize: bool = False):
-        return self.explorer.get_point_cloud(sample_data_token, sensor_channel, num_sweeps, corrected, normalize)
+                        num_sweeps: int = 1):
+        return self.explorer.get_point_cloud(sample_data_token, sensor_channel, num_sweeps)
 
     def generate_next_token(self, scene: int = None, sample_token: str = None):
         return self.explorer.generate_next_token(scene=scene, sample_token=sample_token)
@@ -1633,7 +1631,7 @@ class LyftDatasetExplorer:
         # * image's size may change in the y direction
 
         # Get the point cloud data
-        xyz_pc, _ = self.lyftd.get_point_cloud(sample_data_token, corrected=False, num_sweeps=num_sweeps)
+        xyz_pc, _ = self.lyftd.get_point_cloud(sample_data_token, num_sweeps=num_sweeps)
 
         # spherical projection of the xyz data:
         sph_data = np.zeros(xyz_pc.shape)
